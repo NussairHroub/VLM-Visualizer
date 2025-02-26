@@ -1,0 +1,7 @@
+To generate the output in the image, you can use the following Python code:
+```python
+print("apple")
+print("banana")
+print("cherry")
+```
+This code will print the words "apple", "banana", and "cherry" on the screen. The output will be similar to the image, with the words arranged in a row.</s>
