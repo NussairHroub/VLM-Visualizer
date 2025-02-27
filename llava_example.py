@@ -219,3 +219,71 @@ ax.set_title("at each token, the sum of attention weights over all the vision to
 fig.savefig(os.path.join(output_dir, "trend_attention_weights.png"), dpi=150, bbox_inches="tight")
 plt.close(fig)
 
+# connect with the vision encoder attention
+# to visualize the attention over the image
+
+# vis_attn_matrix will be of torch.Size([N, N])
+# where N is the number of vision tokens/patches
+# `all_prev_layers=True` will average attention from all layers until the selected layer
+# otherwise only the selected layer's attention will be used
+vis_attn_matrix = aggregate_vit_attention(
+    model.get_vision_tower().image_attentions,
+    select_layer=model.get_vision_tower().select_layer,
+    all_prev_layers=True
+)
+grid_size = model.get_vision_tower().num_patches_per_side
+
+num_image_per_row = 8
+image_ratio = image_size[0] / image_size[1]
+num_rows = output_token_len // num_image_per_row + (1 if output_token_len % num_image_per_row != 0 else 0)
+fig, axes = plt.subplots(
+    num_rows, num_image_per_row, 
+    figsize=(10, (10 / num_image_per_row) * image_ratio * num_rows), 
+    dpi=150
+)
+plt.subplots_adjust(wspace=0.05, hspace=0.2)
+
+# whether visualize the attention heatmap or 
+# the image with the attention heatmap overlayed
+vis_overlayed_with_attn = True
+
+output_token_inds = list(range(output_token_start, output_token_end))
+for i, ax in enumerate(axes.flatten()):
+    if i >= output_token_len:
+        ax.axis("off")
+        continue
+
+    target_token_ind = output_token_inds[i] - 1
+    attn_weights_over_vis_tokens = llm_attn_matrix[target_token_ind][vision_token_start:vision_token_end]
+    attn_weights_over_vis_tokens = attn_weights_over_vis_tokens / attn_weights_over_vis_tokens.sum()
+
+    attn_over_image = []
+    for weight, vis_attn in zip(attn_weights_over_vis_tokens, vis_attn_matrix):
+        vis_attn = vis_attn.reshape(grid_size, grid_size)
+        # vis_attn = vis_attn / vis_attn.max()
+        attn_over_image.append(vis_attn * weight)
+    attn_over_image = torch.stack(attn_over_image).sum(dim=0)
+    attn_over_image = attn_over_image / attn_over_image.max()
+
+    attn_over_image = F.interpolate(
+        attn_over_image.unsqueeze(0).unsqueeze(0), 
+        size=image.size, 
+        mode='nearest', 
+        # mode='bicubic', align_corners=False
+    ).squeeze()
+
+    np_img = np.array(image)[:, :, ::-1]
+    img_with_attn, heatmap = show_mask_on_image(np_img, attn_over_image.numpy())
+    ax.imshow(heatmap if not vis_overlayed_with_attn else img_with_attn)
+    ax.set_title(
+        tokenizer.decode(outputs["sequences"][0][i], add_special_tokens=False).strip(),
+        fontsize=7,
+        pad=1
+    )
+    ax.axis("off")
+
+fig.savefig(os.path.join(output_dir, "vision_attention_overlay.png"), dpi=150, bbox_inches="tight")
+plt.close(fig)
+
+
+
